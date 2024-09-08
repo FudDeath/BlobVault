@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+        rel="stylesheet"
+        crossorigin="anonymous"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Upload Encrypted Blobs</title>
+
+    <style>
+        dt { opacity: 80%; }
+        object { object-fit: cover; }
+    </style>
+
+    <!-- CryptoJS for encryption -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+</head>
+
+<body>
+    <header class="container my-3">
+        <hgroup>
+            <h1>Walrus Encrypted Blob Upload</h1>
+            <p class="lead">An example of uploading and displaying encrypted files with Walrus.</p>
+        </hgroup>
+    </header>
+    <main class="container">
+        <div class="row align-items-start gx-5">
+            <section class="col-lg-5 mb-3">
+                <hgroup>
+                    <h2>Encrypted Blob Upload</h2>
+                    <p>
+                        Upload encrypted blobs to Walrus, and display them on this page. See the
+                        <a href="https://mystenlabs.github.io/walrus-docs" target="_blank">Walrus documentation</a>
+                        for more information. The file size is limited to 10 MiB on the default publisher. Use the
+                        <a href="https://docs.walrus.site/usage/client-cli.html" target="_blank">CLI tool</a>
+                        to store bigger files.
+                    </p>
+                </hgroup>
+
+                <form id="upload-form" onsubmit="return onSubmit(event)" class="mb-3">
+                    <fieldset class="row g-3">
+                        <div class="col-lg-6">
+                            <label for="publisher-url-input" class="form-label">Walrus publisher URL</label>
+                            <input
+                                id="publisher-url-input"
+                                type="url"
+                                class="form-control"
+                                placeholder="https://publisher-devnet.walrus.space"
+                                value="https://publisher-devnet.walrus.space"
+                                required
+                            />
+                        </div>
+
+                        <div class="col-lg-6">
+                            <label for="aggregator-url-input" class="form-label">Walrus aggregator URL</label>
+                            <input
+                                id="aggregator-url-input"
+                                type="url"
+                                class="form-control"
+                                placeholder="https://aggregator-devnet.walrus.space"
+                                value="https://aggregator-devnet.walrus.space"
+                                required
+                            />
+                        </div>
+
+                        <div class="col-12">
+                            <label for="file-input" class="form-label">
+                                Blob to upload (<strong>Max 10 MiB size</strong> on the default publisher!)
+                            </label>
+                            <input id="file-input" type="file" class="form-control" required />
+                        </div>
+
+                        <div class="col-12">
+                            <label for="secret-key-input" class="form-label">Secret Key for Encryption</label>
+                            <input id="secret-key-input" type="password" class="form-control" required 
+                                   placeholder="Enter a secret key for encryption" />
+                        </div>
+
+                        <div class="col-12">
+                            <label for="epochs-input" class="form-label">Epochs</label>
+                            <input
+                                id="epochs-input"
+                                type="number"
+                                value="1"
+                                min="1"
+                                placeholder="Epochs"
+                                class="form-control"
+                                required
+                            />
+                            <div class="form-text">
+                                The number of Walrus epochs for which to store the blob.
+                            </div>
+                        </div>
+
+                        <button id="submit" class="btn btn-primary">
+                            <span
+                                id="submit-spinner"
+                                class="spinner-border spinner-border-sm"
+                                aria-hidden="true"
+                                style="visibility: collapse"
+                            ></span>
+                            <span id="submit-text" role="status">Upload</span>
+                        </button>
+                    </fieldset>
+                </form>
+
+                <div id="alert" class="alert alert-danger" role="alert" style="visibility: hidden"></div>
+            </section>
+
+            <section class="col-lg-7">
+                <h2>Uploaded Encrypted Blobs</h2>
+                <div id="uploaded-blobs">
+                    <!-- Container for info about uploaded blobs -->
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        const SUI_NETWORK = "testnet";
+        const SUI_VIEW_TX_URL = `https://suiscan.xyz/${SUI_NETWORK}/tx`;
+        const SUI_VIEW_OBJECT_URL = `https://suiscan.xyz/${SUI_NETWORK}/object`;
+
+        function onSubmit(event) {
+            event.preventDefault();
+            enableForm(false);
+
+            storeEncryptedBlob()
+                .then((storageInfo) => {
+                    displayUpload(storageInfo.info, storageInfo.media_type);
+                    alert(null);
+                    enableForm(true);
+                })
+                .catch((error) => {
+                    console.error(error);
+                    alert(
+                        "An error occurred while uploading. Check the browser console and ensure that \
+                        the aggregator and publisher URLs are correct.",
+                    );
+                    enableForm(true);
+                });
+
+            return false;
+        }
+
+        async function encryptFile(file, secretKey) {
+            const fileContent = await readFileAsArrayBuffer(file);
+            const wordArray = CryptoJS.lib.WordArray.create(fileContent);
+            
+            // Create a JSON object with all sensitive information
+            const sensitiveData = JSON.stringify({
+                content: wordArray.toString(CryptoJS.enc.Base64),
+                fileType: file.type,
+                fileName: file.name
+            });
+
+            // Encrypt the entire JSON object
+            const encryptedContent = CryptoJS.AES.encrypt(sensitiveData, secretKey).toString();
+
+            return new Blob([JSON.stringify({
+                encryptedContent: encryptedContent
+            })], { type: 'application/json' });
+        }
+
+        function readFileAsArrayBuffer(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        async function storeEncryptedBlob() {
+            const inputFile = document.getElementById("file-input").files[0];
+            const secretKey = document.getElementById("secret-key-input").value;
+            const numEpochs = document.getElementById("epochs-input").value;
+            const basePublisherUrl = document.getElementById("publisher-url-input").value;
+
+            try {
+                const encryptedBlob = await encryptFile(inputFile, secretKey);
+
+                const response = await fetch(`${basePublisherUrl}/v1/store?epochs=${numEpochs}`, {
+                    method: "PUT",
+                    body: encryptedBlob,
+                });
+
+                if (response.status === 200) {
+                    const info = await response.json();
+                    console.log(info);
+                    return { info: info, media_type: 'application/json' };
+                } else {
+                    throw new Error("Something went wrong when storing the blob!");
+                }
+            } catch (error) {
+                console.error("Error in storeEncryptedBlob:", error);
+                throw error;
+            }
+        }
+
+        function displayUpload(storage_info, media_type) {
+            let info;
+            if ("alreadyCertified" in storage_info) {
+                info = {
+                    status: "Already certified",
+                    blobId: storage_info.alreadyCertified.blobId,
+                    endEpoch: storage_info.alreadyCertified.endEpoch,
+                    suiRefType: "Previous Sui Certified Event",
+                    suiRef: storage_info.alreadyCertified.event.txDigest,
+                    suiBaseUrl: SUI_VIEW_TX_URL,
+                };
+            } else if ("newlyCreated" in storage_info) {
+                info = {
+                    status: "Newly created",
+                    blobId: storage_info.newlyCreated.blobObject.blobId,
+                    endEpoch: storage_info.newlyCreated.blobObject.storage.endEpoch,
+                    suiRefType: "Associated Sui Object",
+                    suiRef: storage_info.newlyCreated.blobObject.id,
+                    suiBaseUrl: SUI_VIEW_OBJECT_URL,
+                };
+            } else {
+                throw Error("Unhandled successful response!");
+            }
+
+            const baseAggregatorUrl = document.getElementById("aggregator-url-input").value;
+            const blobUrl = `${baseAggregatorUrl}/v1/${info.blobId}`;
+            const suiUrl = `${info.suiBaseUrl}/${info.suiRef}`;
+
+            document.getElementById("uploaded-blobs").insertAdjacentHTML(
+                "afterBegin",
+                `<article class="row border rounded-2 shadow-sm mb-3">
+                    <div class="col-4 ps-0">Encrypted Content</div>
+                    <dl class="blob-info col-8 my-2">
+                        <dt>Status</dt><dd>${info.status}</dd>
+                        <dt>Blob ID</dt>
+                        <dd class="text-truncate"><a href="${blobUrl}">${info.blobId}</a></dd>
+                        <dt>${info.suiRefType}</dt>
+                        <dd class="text-truncate">
+                            <a href="${suiUrl}" target="_blank">${info.suiRef}</a>
+                        </dd>
+                        <dt>Stored until epoch</dt><dd>${info.endEpoch}</dd>
+                    </dl>
+                </article>`,
+            );
+        }
+
+        function enableForm(isEnabled) {
+            if (isEnabled) {
+                const publisherUrl = document.getElementById("publisher-url-input").value;
+                const aggregatorUrl = document.getElementById("aggregator-url-input").value;
+                const secretKey = document.getElementById("secret-key-input").value;
+                document.getElementById("upload-form").reset();
+                document.getElementById("publisher-url-input").value = publisherUrl;
+                document.getElementById("aggregator-url-input").value = aggregatorUrl;
+                document.getElementById("secret-key-input").value = secretKey;
+                document.getElementById("submit-spinner").style.visibility = "collapse";
+                document.getElementById("submit-text").textContent = "Upload";
+                document.querySelector("#upload-form fieldset").removeAttribute("disabled");
+            } else {
+                document.querySelector("#upload-form fieldset").setAttribute("disabled", "");
+                document.getElementById("submit-spinner").style.visibility = "visible";
+                document.getElementById("submit-text").textContent = "Uploading ...";
+            }
+        }
+
+        function alert(message) {
+            const alertElement = document.getElementById("alert");
+            if (message !== null) {
+                alertElement.textContent = message;
+            }
+            alertElement.style.visibility = message !== null ? "visible" : "hidden";
+        }
+    </script>
+</body>
+</html>
