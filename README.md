@@ -1,2 +1,2 @@
-encrypt.walrus.site
-decrypt.walrus.site
+File encryption: encrypt.walrus.site
+File decryption: decrypt.walrus.site
